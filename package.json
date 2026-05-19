@@ -6,6 +6,9 @@
     "main": "dist/index.js",
     "module": "dist/index.js",
     "types": "dist/index.d.ts",
+    "exports": {
+        ".": "./src/index.ts"
+    },
     "scripts": {
         "test": "node examples/midi_to_wav_node.ts",
         "lint": "eslint .",
