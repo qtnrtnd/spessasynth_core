@@ -16,7 +16,7 @@
         "test:midi": "tsx tests/midi_file/make_tests.ts",
         "install:examples": "tsx scripts/install_examples.ts",
         "prepublishOnly": "npm run format && npm run build",
-        "prepare": "husky install"
+        "prepare": ""
     },
     "repository": {
         "type": "git",
