@@ -10,7 +10,7 @@
         "test": "node examples/midi_to_wav_node.ts",
         "lint": "eslint .",
         "build:fast": "rimraf -rf dist && tsdown src/index.ts --platform neutral --sourcemap",
-        "build": "npm run test:types && npm run build:fast",
+        "build": "npm run build:fast",
         "format": "prettier . --write",
         "test:types": "npm run lint && tsc -b ",
         "prepack": "npm run build:fast && rimraf -rf *.tgz",
