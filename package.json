@@ -15,7 +15,7 @@
         "test:types": "npm run lint && tsc -b ",
         "prepack": "npm run build:fast && rimraf -rf *.tgz",
         "prepublishOnly": "npm run format && npm run build",
-        "prepare": "husky install"
+        "prepare": ""
     },
     "repository": {
         "type": "git",
