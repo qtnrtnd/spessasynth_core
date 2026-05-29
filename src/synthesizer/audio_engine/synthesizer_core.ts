@@ -454,6 +454,7 @@ export class SynthesizerCore {
      */
     public stopAllChannels(force: boolean) {
         SpessaLog.info("%cStop all received!", ConsoleColors.info);
+        this.eventQueue.length = 0;
         for (const channel of this.midiChannels) {
             channel.stopAllNotes(force);
         }
