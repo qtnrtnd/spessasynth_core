@@ -5,6 +5,7 @@ import type {
     SynthProcessorOptions
 } from "../types";
 import type { BasicPreset } from "../../soundbank/basic_soundbank/basic_preset";
+import { LazySample } from "../../soundbank/basic_soundbank/lazy_sample";
 import {
     DEFAULT_GLOBAL_SYSTEM_PARAMETERS,
     type GlobalSystemParameter,
@@ -812,6 +813,12 @@ export class SynthesizerCore {
             velocity
         )) {
             const sample = voiceParams.sample;
+            // Network-lazy: a sample whose audio hasn't been loaded yet — skip
+            // the voice silently (it plays once loaded + cache invalidated),
+            // never call getAudioData() on it (it would throw).
+            if (sample instanceof LazySample && !sample.isResident) {
+                continue;
+            }
             if (voiceParams.sample.getAudioData() === undefined) {
                 SpessaLog.warn(`Discarding invalid sample: ${sample.name}`);
                 continue;

@@ -6,6 +6,7 @@ import {
 import { SpessaLog } from "../../../utils/loggin";
 import { readBinaryStringIndexed } from "../../../utils/byte_functions/string";
 import { BasicSample } from "../../basic_soundbank/basic_sample";
+import { LazySample } from "../../basic_soundbank/lazy_sample";
 import { ConsoleColors } from "../../../utils/other";
 import type { SampleType } from "../../enums";
 import type { RIFFChunk } from "../../../utils/riff_chunk";
@@ -205,23 +206,24 @@ export class SoundFontSample extends BasicSample {
 }
 
 /**
- * Reads the samples from the shdr chunk
+ * Reads the samples from the shdr chunk.
+ * @param headersOnly when true the `smpl` chunk is empty (a `meta.<hash>.sf3`):
+ * builds {@link LazySample}s (byte ranges only, no audio) instead of slicing.
  */
 export function readSamples(
     sampleHeadersChunk: RIFFChunk,
     smplChunkData: IndexedByteArray | Float32Array,
-    linkSamples = true
-): SoundFontSample[] {
-    const samples: SoundFontSample[] = [];
+    linkSamples = true,
+    headersOnly = false
+): (SoundFontSample | LazySample)[] {
+    const samples: (SoundFontSample | LazySample)[] = [];
     let index = 0;
     while (
         sampleHeadersChunk.data.length > sampleHeadersChunk.data.currentIndex
     ) {
-        const sample = readSample(
-            index,
-            sampleHeadersChunk.data,
-            smplChunkData
-        );
+        const sample = headersOnly
+            ? readLazySample(index, sampleHeadersChunk.data)
+            : readSample(index, sampleHeadersChunk.data, smplChunkData);
         samples.push(sample);
         index++;
     }
@@ -234,6 +236,62 @@ export function readSamples(
     }
 
     return samples;
+}
+
+/**
+ * Reads one shdr entry into a LazySample (no audio sliced).
+ */
+function readLazySample(
+    index: number,
+    sampleHeaderData: IndexedByteArray
+): LazySample {
+    const sampleName = readBinaryStringIndexed(sampleHeaderData, 20);
+    // shdr stores sample-point indices; ×2 → bytes (s16le), matching readSample.
+    const sampleStartIndex = readLittleEndianIndexed(sampleHeaderData, 4) * 2;
+    const sampleEndIndex = readLittleEndianIndexed(sampleHeaderData, 4) * 2;
+    const sampleLoopStartIndex = readLittleEndianIndexed(sampleHeaderData, 4);
+    const sampleLoopEndIndex = readLittleEndianIndexed(sampleHeaderData, 4);
+    const sampleRate = readLittleEndianIndexed(sampleHeaderData, 4);
+    let samplePitch = sampleHeaderData[sampleHeaderData.currentIndex++];
+    if (samplePitch > 127) {
+        samplePitch = 60;
+    }
+    const samplePitchCorrection = signedInt8(
+        sampleHeaderData[sampleHeaderData.currentIndex++]
+    );
+    const sampleLink = readLittleEndianIndexed(sampleHeaderData, 2);
+    let sampleType = readLittleEndianIndexed(sampleHeaderData, 2) as SampleType;
+
+    const compressed = (sampleType & SF3_BIT_FLIT) > 0;
+    sampleType = (sampleType & ~SF3_BIT_FLIT) as SampleType;
+
+    // Byte range within the `smpl` data (mirrors SoundFontSample slicing math).
+    // SF3 (vorbis): the per-sample blob is at smpl[start/2 .. end/2].
+    // SF2 (s16le): raw bytes at smpl[start .. end].
+    const byteStart = compressed ? sampleStartIndex / 2 : sampleStartIndex;
+    const byteEnd = compressed ? sampleEndIndex / 2 : sampleEndIndex;
+    // Loop points: SF3 are absolute sample indices; s16le are relative.
+    const loopStart = compressed
+        ? sampleLoopStartIndex
+        : sampleLoopStartIndex - sampleStartIndex / 2;
+    const loopEnd = compressed
+        ? sampleLoopEndIndex
+        : sampleLoopEndIndex - sampleStartIndex / 2;
+
+    return new LazySample(
+        sampleName,
+        sampleRate,
+        samplePitch,
+        samplePitchCorrection,
+        sampleType,
+        loopStart,
+        loopEnd,
+        index,
+        byteStart,
+        byteEnd - byteStart,
+        compressed,
+        sampleLink
+    );
 }
 
 /**

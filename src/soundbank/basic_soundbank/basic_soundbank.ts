@@ -13,6 +13,7 @@ import { stbvorbis } from "../../externals/stbvorbis_sync/stbvorbis_wrapper";
 
 import type {
     DLSWriteOptions,
+    GenericRange,
     MIDISystem,
     PresetsWithKeyCombinations,
     SetSampleFormatOptions,
@@ -419,6 +420,58 @@ export class BasicSoundBank {
     public flush() {
         this.presets.sort(MIDIPatchTools.compare.bind(MIDIPatchTools));
         this.parseInternal();
+    }
+
+    /**
+     * Sample IDs (indices into {@link samples}) needed to play a preset over a
+     * given key/velocity window — used by network-lazy loading to fetch only the
+     * samples a preset actually uses. Reuses trim()'s key/vel intersection logic
+     * and includes stereo `linkedSample`s. `keyRange`/`velRange` default to the
+     * full MIDI range; a single-key `keyRange` resolves to one drum.
+     */
+    public requiredSampleIds(
+        preset: BasicPreset,
+        opts: { keyRange?: GenericRange; velRange?: GenericRange } = {}
+    ): number[] {
+        const reqKey = opts.keyRange ?? { min: 0, max: 127 };
+        const reqVel = opts.velRange ?? { min: 0, max: 127 };
+        // A zone's `min === -1` means "default" (covers the whole range).
+        const eff = (r: GenericRange): GenericRange =>
+            r.min === -1 ? { min: 0, max: r.max } : r;
+        // Three intervals share a value iff max(mins) <= min(maxs).
+        const intersect = (
+            a: GenericRange,
+            b: GenericRange,
+            c: GenericRange
+        ) =>
+            Math.max(a.min, b.min, c.min) <= Math.min(a.max, b.max, c.max);
+
+        const ids = new Set<number>();
+        for (const pZone of preset.zones) {
+            const pKey = eff(pZone.keyRange);
+            const pVel = eff(pZone.velRange);
+            for (const iZone of pZone.instrument.zones) {
+                const iKey = eff(iZone.keyRange);
+                const iVel = eff(iZone.velRange);
+                if (
+                    !intersect(reqKey, pKey, iKey) ||
+                    !intersect(reqVel, pVel, iVel)
+                ) {
+                    continue;
+                }
+                const add = (s: BasicSample) => {
+                    const id = this.samples.indexOf(s);
+                    if (id !== -1) {
+                        ids.add(id);
+                    }
+                };
+                add(iZone.sample);
+                if (iZone.sample.linkedSample) {
+                    add(iZone.sample.linkedSample);
+                }
+            }
+        }
+        return [...ids];
     }
 
     /**

@@ -115,6 +115,33 @@ export class SoundBankManager {
     }
 
     /**
+     * Injects audio data into lazy samples of a given bank (network-lazy
+     * loading). The caller must invalidate the voice cache afterwards
+     * (`SynthProcessor.clearCache`) so skipped voices re-resolve.
+     * @param id the bank to inject into.
+     * @param samples the sample data keyed by `sampleId` (index in `samples`).
+     */
+    public loadSamples(
+        id: string,
+        samples: { sampleId: number; data: ArrayBuffer }[]
+    ) {
+        const entry = this.soundBankList.find((s) => s.id === id);
+        if (!entry) {
+            SpessaLog.warn(`loadSamples: no sound bank "${id}".`);
+            return;
+        }
+        const bankSamples = entry.soundBank.samples;
+        for (const { sampleId, data } of samples) {
+            const sample = bankSamples[sampleId];
+            if (!sample) {
+                SpessaLog.warn(`loadSamples: no sample ${sampleId} in "${id}".`);
+                continue;
+            }
+            sample.setCompressedData(new Uint8Array(data));
+        }
+    }
+
+    /**
      * Gets a given preset from the sound bank stack.
      * @param patch The MIDI patch to search for.
      * @param system The MIDI system to select the preset for.

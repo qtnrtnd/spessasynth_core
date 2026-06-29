@@ -205,6 +205,9 @@ export class SoundFont2 extends BasicSoundBank {
         SpessaLog.info("%cVerifying smpl chunk...", ConsoleColors.warn);
         const sampleDataChunk = RIFFChunk.read(mainFileArray, false);
         this.verifyHeader(sampleDataChunk, "smpl");
+        // Empty `smpl` ⇒ a "headers-only" soundfont (meta.<hash>.sf3 for lazy
+        // loading): build LazySamples (byte ranges only) instead of slicing.
+        const headersOnly = !isSF2Pack && sampleDataChunk.size === 0;
         let sampleData: IndexedByteArray | Float32Array;
         // SF2Pack: the entire data is compressed
         if (isSF2Pack) {
@@ -287,7 +290,8 @@ export class SoundFont2 extends BasicSoundBank {
         const samples = readSamples(
             shdrChunk,
             sampleData,
-            xdtaChunk === undefined
+            xdtaChunk === undefined,
+            headersOnly
         );
 
         if (xdtaChunk && xChunks.shdr) {
