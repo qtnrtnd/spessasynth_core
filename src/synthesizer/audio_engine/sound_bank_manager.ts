@@ -9,6 +9,7 @@ import {
     type MIDIPatchFull,
     MIDIPatchTools
 } from "../../soundbank/basic_soundbank/midi_patch";
+import type { CustomKitRecipe } from "../../soundbank/basic_soundbank/custom_kit";
 import { BankSelectHacks } from "../../utils/midi_hacks";
 import { SpessaLog } from "../../utils/loggin";
 
@@ -139,6 +140,23 @@ export class SoundBankManager {
             }
             sample.setCompressedData(new Uint8Array(data));
         }
+    }
+
+    /**
+     * Assembles a custom drum kit into a bank as a new selectable preset (cf.
+     * `BasicSoundBank.buildPreset` and `concept/audio/drums.md` §3). Regenerates
+     * the preset list, which invalidates the synth's voice cache via the change
+     * callback, so the new preset is immediately playable.
+     * @param recipe the kit recipe (its `id` selects the target bank).
+     */
+    public buildPreset(recipe: CustomKitRecipe) {
+        const entry = this.soundBankList.find((s) => s.id === recipe.id);
+        if (!entry) {
+            SpessaLog.warn(`buildPreset: no sound bank "${recipe.id}".`);
+            return;
+        }
+        entry.soundBank.buildPreset(recipe);
+        this.generatePresetList();
     }
 
     /**

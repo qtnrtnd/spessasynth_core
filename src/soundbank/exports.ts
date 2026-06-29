@@ -8,6 +8,10 @@ export { ModulatorSource } from "./basic_soundbank/modulator_source";
 export { BasicZone } from "./basic_soundbank/basic_zone";
 export { BasicSample, EmptySample } from "./basic_soundbank/basic_sample";
 export { LazySample } from "./basic_soundbank/lazy_sample";
+export type {
+    CustomKitRecipe,
+    CustomKitSlot
+} from "./basic_soundbank/custom_kit";
 export { BasicInstrumentZone } from "./basic_soundbank/basic_instrument_zone";
 export { BasicInstrument } from "./basic_soundbank/basic_instrument";
 export { BasicPreset } from "./basic_soundbank/basic_preset";

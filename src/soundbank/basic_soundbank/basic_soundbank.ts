@@ -23,6 +23,7 @@ import type {
 } from "../types";
 import { GeneratorTypes } from "./generator_types";
 import { type MIDIPatch, MIDIPatchTools } from "./midi_patch";
+import type { CustomKitRecipe } from "./custom_kit";
 import {
     DEFAULT_DLS_OPTIONS,
     DownloadableSounds
@@ -472,6 +473,106 @@ export class BasicSoundBank {
             }
         }
         return [...ids];
+    }
+
+    /**
+     * Assembles a custom drum kit as a new preset (cf. `concept/audio/drums.md`
+     * §3–§4). For each slot, clones the source kit's instrument zone(s) that play
+     * `source.key` — including every stereo half and velocity layer within
+     * `velRange` — into a single new instrument, *sharing* the source samples (no
+     * audio is copied) and re-targeting `keyRange` to the destination pad key. Any
+     * existing preset on the same patch is replaced.
+     *
+     * Only instrument-level zones are cloned (preset-zone offsets are not baked
+     * in): faithful for GM drum kits, where each drum's tuning/level/pan/choke
+     * live on its instrument zone.
+     * @param recipe the kit recipe.
+     * @returns the assembled preset.
+     */
+    public buildPreset(recipe: CustomKitRecipe): BasicPreset {
+        // Rebuild in place: drop any existing preset on the same patch.
+        const existing = this.presets.find((p) =>
+            MIDIPatchTools.matches(p, recipe.patch)
+        );
+        if (existing) {
+            this.deletePreset(existing);
+        }
+
+        // Range helpers — a zone's `min === -1` is a "default" (covers from 0).
+        const covers = (r: GenericRange, value: number) =>
+            value >= Math.max(r.min, 0) && value <= r.max;
+        const overlaps = (a: GenericRange, b: GenericRange) =>
+            Math.max(Math.max(a.min, 0), Math.max(b.min, 0)) <=
+            Math.min(a.max, b.max);
+
+        const name = recipe.name ?? "Custom Kit";
+        const instrument = new BasicInstrument();
+        instrument.name = name;
+
+        for (const slot of recipe.slots) {
+            const src = this.presets.find((p) =>
+                MIDIPatchTools.matches(p, slot.source.patch)
+            );
+            if (!src) {
+                SpessaLog.warn(
+                    `buildPreset: no source preset for ${MIDIPatchTools.toMIDIString(slot.source.patch)}.`
+                );
+                continue;
+            }
+            const key = slot.source.key;
+            const velReq = slot.velRange ?? { min: 0, max: 127 };
+
+            for (const pZone of src.zones) {
+                const pKey = pZone.hasKeyRange
+                    ? pZone.keyRange
+                    : src.globalZone.keyRange;
+                if (!covers(pKey, key)) {
+                    continue;
+                }
+                const inst = pZone.instrument;
+                for (const iZone of inst.zones) {
+                    const iKey = iZone.hasKeyRange
+                        ? iZone.keyRange
+                        : inst.globalZone.keyRange;
+                    const iVel = iZone.hasVelRange
+                        ? iZone.velRange
+                        : inst.globalZone.velRange;
+                    if (!covers(iKey, key) || !overlaps(velReq, iVel)) {
+                        continue;
+                    }
+                    // Share the (lazy) sample; clone the whole zone for fidelity.
+                    const z = instrument.createZone(iZone.sample);
+                    z.copyFrom(iZone);
+                    // Re-target to the destination pad key (velRange = layers kept).
+                    z.keyRange = { min: slot.destKey, max: slot.destKey };
+                    // Drums use scaleTuning = 0 (the key does not repitch); anchor
+                    // the root key if unset so the moved zone is self-contained.
+                    if (
+                        z.getGenerator(GeneratorTypes.overridingRootKey, -1) ===
+                        -1
+                    ) {
+                        z.setGenerator(
+                            GeneratorTypes.overridingRootKey,
+                            iZone.sample.originalKey
+                        );
+                    }
+                    // exclusiveClass (choke groups) kept verbatim — drums.md §4.3.
+                }
+            }
+        }
+
+        const preset = new BasicPreset(this);
+        preset.name = name;
+        preset.program = recipe.patch.program;
+        preset.bankMSB = recipe.patch.bankMSB;
+        preset.bankLSB = recipe.patch.bankLSB;
+        preset.isGMGSDrum = recipe.patch.isGMGSDrum;
+        preset.createZone(instrument);
+
+        this.addInstruments(instrument);
+        this.addPresets(preset);
+        this.flush();
+        return preset;
     }
 
     /**
