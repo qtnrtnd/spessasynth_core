@@ -101,6 +101,17 @@ export interface GlobalSystemParameter {
     blackMIDIMode: boolean;
 
     /**
+     * Network-lazy: when every sample a note needs is still missing, play the
+     * nearest key that _is_ loaded, transposed onto the requested note, instead
+     * of skipping the voice. This is what makes a preset playable from a single
+     * resident sample (`concept/audio/soundfonts.md` §7.1), at the cost of an
+     * approximate timbre until the real sample arrives.
+     *
+     * Off by default: the default behavior stays the silent skip.
+     */
+    lazyKeySubstitution: boolean;
+
+    /**
      * Synthesizer's device ID for system exclusive messages. Set to -1 to accept all.
      */
     deviceID: number;
@@ -170,6 +181,7 @@ export const DEFAULT_GLOBAL_SYSTEM_PARAMETERS: GlobalSystemParameter = {
     drumLock: false,
 
     blackMIDIMode: false,
+    lazyKeySubstitution: false,
     deviceID: -1,
 
     // Shared with channel
@@ -215,6 +227,13 @@ export function setSystemParameterInternal<
                 );
                 this.allocateNewVoices(cap - this.voices.length);
             }
+            break;
+        }
+
+        case "lazyKeySubstitution": {
+            // Voices cached under the previous policy would keep their substitute
+            // (or their silence) forever.
+            this.clearCache();
             break;
         }
 

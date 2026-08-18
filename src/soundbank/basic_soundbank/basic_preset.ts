@@ -26,6 +26,7 @@ import {
     writeWord
 } from "../../utils/byte_functions/little_endian";
 import { BasicZone } from "./basic_zone";
+import { LazySample } from "./lazy_sample";
 
 export const PHDR_BYTE_SIZE = 38;
 
@@ -318,6 +319,67 @@ export class BasicPreset implements MIDIPatchFull {
             }
         }
         return voiceParameters;
+    }
+
+    /**
+     * Network-lazy fallback: the voice parameters of the nearest key whose samples
+     * are already resident, to be rendered **at `midiNote`** — that is, the
+     * neighboring zone transposed onto the requested note. Empty when nothing
+     * usable sits within `maxDistance` semitones.
+     *
+     * The whole zone is reused, never just its sample: loop points and address
+     * offsets describe the audio data they were parsed with, so grafting another
+     * sample into these generators would loop out of bounds.
+     *
+     * A zone that does not follow the key — `scaleTuning` 0 (percussion) or a
+     * fixed `keyNum` — is never substituted: it would sound its own pitch, so a
+     * kick would answer for a snare.
+     *
+     * At equal distance the lower key wins. The tie-break is arbitrary, but being
+     * fixed it makes the substitution a pure function of the resident set, so two
+     * clients holding the same samples resolve a note identically.
+     *
+     * `maxDistance` defaults to 4 octaves: past that the transposition is not
+     * musically usable anyway, and it bounds the search inside the worklet.
+     */
+    public getSubstituteVoiceParameters(
+        midiNote: number,
+        velocity: number,
+        maxDistance = 48
+    ): VoiceParameters[] {
+        for (let distance = 1; distance <= maxDistance; distance++) {
+            const below = midiNote - distance;
+            if (below >= 0) {
+                const params = this.getVoiceParameters(below, velocity);
+                if (BasicPreset.isSubstitutable(params)) {
+                    return params;
+                }
+            }
+            const above = midiNote + distance;
+            if (above <= 127) {
+                const params = this.getVoiceParameters(above, velocity);
+                if (BasicPreset.isSubstitutable(params)) {
+                    return params;
+                }
+            }
+        }
+        return [];
+    }
+
+    /**
+     * Whether a key's voices can stand in for another key: all of them playable
+     * right now, and all of them repitched by the key.
+     */
+    private static isSubstitutable(params: VoiceParameters[]): boolean {
+        return (
+            params.length > 0 &&
+            params.every(
+                (p) =>
+                    p.generators[GeneratorTypes.scaleTuning] !== 0 &&
+                    p.generators[GeneratorTypes.keyNum] <= -1 &&
+                    (!(p.sample instanceof LazySample) || p.sample.isResident)
+            )
+        );
     }
 
     /**

@@ -808,15 +808,17 @@ export class SynthesizerCore {
         // Not cached...
         // Create the voices
         const voices = new Array<CachedVoice>();
+        let skippedLazy = false;
         for (const voiceParams of preset.getVoiceParameters(
             midiNote,
             velocity
         )) {
             const sample = voiceParams.sample;
-            // Network-lazy: a sample whose audio hasn't been loaded yet — skip
-            // the voice silently (it plays once loaded + cache invalidated),
-            // never call getAudioData() on it (it would throw).
+            /* Network-lazy: a sample whose audio hasn't been loaded yet — skip
+               the voice (it plays once loaded + cache invalidated), and never
+               call getAudioData() on it (it would throw). */
             if (sample instanceof LazySample && !sample.isResident) {
+                skippedLazy = true;
                 continue;
             }
             if (voiceParams.sample.getAudioData() === undefined) {
@@ -831,6 +833,33 @@ export class SynthesizerCore {
                     this.sampleRate
                 )
             );
+        }
+        /* Network-lazy: nothing playable here, yet the note IS in the preset's
+           range (`skippedLazy`) — play the nearest resident key transposed, so a
+           preset stays playable from a single loaded sample. Opt-in, and never a
+           mask for a broken sample: an empty result with nothing lazily skipped
+           stays silent and warned about. */
+        if (
+            voices.length === 0 &&
+            skippedLazy &&
+            this.systemParameters.lazyKeySubstitution
+        ) {
+            for (const voiceParams of preset.getSubstituteVoiceParameters(
+                midiNote,
+                velocity
+            )) {
+                if (voiceParams.sample.getAudioData() === undefined) {
+                    continue;
+                }
+                voices.push(
+                    new CachedVoice(
+                        voiceParams,
+                        midiNote,
+                        velocity,
+                        this.sampleRate
+                    )
+                );
+            }
         }
         // Cache the voice
         this.setCachedVoice(preset, midiNote, velocity, voices);
