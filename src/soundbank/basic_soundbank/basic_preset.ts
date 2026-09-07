@@ -367,6 +367,39 @@ export class BasicPreset implements MIDIPatchFull {
     }
 
     /**
+     * Whether the loudest voice of a key is still a pending lazy sample.
+     *
+     * A partly resident stack is not a quieter version of the note. Layers of a
+     * preset rarely share key ranges: a wide-ranged accompaniment layer stays
+     * resident long after the main layer has gone out of range, and what is left
+     * sounds ~20 dB down and with the wrong timbre — while still counting as a
+     * playable voice, which is why the caller cannot detect this by an empty
+     * result. Losing a secondary layer only thins the note, which is worth less
+     * than transposing a whole neighboring key, so only the dominant one asks
+     * for a substitute.
+     *
+     * Attenuation is the layer's own declared level, not the loudness it ends up
+     * rendering: it ignores the sample's amplitude and every modulator applied
+     * downstream. It is the one ranking available before a voice is built, and
+     * it separates a lead layer from a body layer, which is all this decides.
+     */
+    public isDominantPending(params: VoiceParameters[]): boolean {
+        let lowest = Infinity;
+        for (const p of params) {
+            lowest = Math.min(
+                lowest,
+                p.generators[GeneratorTypes.initialAttenuation]
+            );
+        }
+        return params.some(
+            (p) =>
+                p.generators[GeneratorTypes.initialAttenuation] === lowest &&
+                p.sample instanceof LazySample &&
+                !p.sample.isResident
+        );
+    }
+
+    /**
      * Whether a key's voices can stand in for another key: all of them playable
      * right now, and all of them repitched by the key.
      */

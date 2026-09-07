@@ -119,6 +119,24 @@ export class SoundBankManager {
      * Injects audio data into lazy samples of a given bank (network-lazy
      * loading). The caller must invalidate the voice cache afterwards
      * (`SynthProcessor.clearCache`) so skipped voices re-resolve.
+     *
+     * The injected data is SF3, i.e. Vorbis, and it is **decoded here** rather
+     * than left to first use. `BasicSample.getAudioData` decodes synchronously,
+     * and its first caller is the voice cache — inside `process()`, on the audio
+     * thread, at the instant a note is attacked. Measured: 6 to 25 ms per sample,
+     * against a render quantum's budget of 2.7 ms, so a note reaching a sample
+     * nobody had played yet costs up to ten missed deadlines — a click, and time
+     * the transport never gets back (the playhead is extrapolated on
+     * `AudioContext.currentTime`). Every injection instead happens while nothing
+     * is playing — the palette floor during the lobby, a turn's voices under the
+     * countdown — so this is the one moment the cost is free. Same intent as the
+     * unused `BasicPreset.preload`, against the set of samples that was actually
+     * asked for rather than a key range.
+     *
+     * It is paid in one block: 250 ms for the largest batch measured. That is
+     * silence against silence today. Should samples ever be fetched while the
+     * monitor runs, this is where the work would have to be spread over several
+     * messages instead.
      * @param id the bank to inject into.
      * @param samples the sample data keyed by `sampleId` (index in `samples`).
      */
@@ -139,6 +157,16 @@ export class SoundBankManager {
                 continue;
             }
             sample.setCompressedData(new Uint8Array(data));
+            /* Guarded one by one: an unreadable sample must not take the rest
+               of the batch down with it. A preset short of one range is
+               playable; a preset that never installed is silent. */
+            try {
+                sample.getAudioData();
+            } catch (error) {
+                SpessaLog.warn(
+                    `loadSamples: could not decode sample ${sampleId} in "${id}": ${String(error)}`
+                );
+            }
         }
     }
 

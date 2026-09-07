@@ -807,12 +807,10 @@ export class SynthesizerCore {
         }
         // Not cached...
         // Create the voices
+        const voiceParameters = preset.getVoiceParameters(midiNote, velocity);
         const voices = new Array<CachedVoice>();
         let skippedLazy = false;
-        for (const voiceParams of preset.getVoiceParameters(
-            midiNote,
-            velocity
-        )) {
+        for (const voiceParams of voiceParameters) {
             const sample = voiceParams.sample;
             /* Network-lazy: a sample whose audio hasn't been loaded yet — skip
                the voice (it plays once loaded + cache invalidated), and never
@@ -834,16 +832,20 @@ export class SynthesizerCore {
                 )
             );
         }
-        /* Network-lazy: nothing playable here, yet the note IS in the preset's
-           range (`skippedLazy`) — play the nearest resident key transposed, so a
-           preset stays playable from a single loaded sample. Opt-in, and never a
-           mask for a broken sample: an empty result with nothing lazily skipped
-           stays silent and warned about. */
+        /* Network-lazy: the note cannot sound as itself — either nothing here
+           is playable, or its loudest layer is still pending and the rest would
+           sound far quieter than this preset does (`isDominantPending`) — yet
+           the note IS in the preset's range (`skippedLazy`). Play the nearest
+           key whose whole stack is resident, transposed, so a preset stays
+           playable from a single loaded sample. Opt-in, and never a mask for a
+           broken sample: an empty result with nothing lazily skipped stays
+           silent and warned about. */
         if (
-            voices.length === 0 &&
             skippedLazy &&
-            this.systemParameters.lazyKeySubstitution
+            this.systemParameters.lazyKeySubstitution &&
+            (voices.length === 0 || preset.isDominantPending(voiceParameters))
         ) {
+            const substitutes = new Array<CachedVoice>();
             for (const voiceParams of preset.getSubstituteVoiceParameters(
                 midiNote,
                 velocity
@@ -851,7 +853,7 @@ export class SynthesizerCore {
                 if (voiceParams.sample.getAudioData() === undefined) {
                     continue;
                 }
-                voices.push(
+                substitutes.push(
                     new CachedVoice(
                         voiceParams,
                         midiNote,
@@ -859,6 +861,15 @@ export class SynthesizerCore {
                         this.sampleRate
                     )
                 );
+            }
+            /* A whole zone stands in for a whole zone: the substitute replaces
+               the partial stack instead of joining it, since layering it over
+               the resident layer would double that layer against a transposed
+               copy of itself. When no complete key is in reach, whatever is
+               resident still beats silence. */
+            if (substitutes.length > 0) {
+                voices.length = 0;
+                voices.push(...substitutes);
             }
         }
         // Cache the voice
